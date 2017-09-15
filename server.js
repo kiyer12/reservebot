@@ -1,3 +1,4 @@
+var serverList = require('./server_list.js');
 
 var express = require('express');
 var app = express();
@@ -11,57 +12,48 @@ app.use(bodyParser.urlencoded({ extended: true })); // for parsing application/x
 
 var fs = require('fs');
 
-var dataStoreFileName = '.data/data.json';
-
-function readServerList() {
-  
-  fs.access(dataStoreFileName, fs.constants.R_OK | fs.constants.W_OK, (err) => {
-    console.log(err ? 'no access!' : 'can read/write');
-    if (!err) {      
-      var contents = fs.readFileSync(dataStoreFileName, 'utf8');
-      console.log(contents);
-      if (contents === null || contents === "" || contents === undefined) {
-        
-        return [
-            {
-              name: 'beta'
-            },
-            {
-              name: 'beta2'
-            }
-        ];
-      }
-
-      return JSON.parse(contents);
+app.get("/list", function (request, response) { 
+  serverList.read(
+    function(db) {
+      console.log("back from reading list.");
+      response.send(constructServerList(db));      
     }
-    else {
-      contents = [
-        {
-          name: 'beta'
-        },
-        {
-          name: 'beta2'
-        }
-      ];
-      return contents;
+  );
+});
+
+
+
+app.get("/clear", function (request, response) {
+  serverList.delete();
+  response.send("clear done");
+});
+
+
+
+function updateTimestamps(db) {
+  for (var i = 0; i < db.length; i++) {
+    var server = db[i];
+    var currentTime = new Date() / 1000;
+
+    if (server.timestamp === undefined || server.timestamp === null ) {
+      
     }
-  });
-  
+    else if (currentTime - server.timestamp > 3600) {
+      delete server.timestamp;  
+    }
+  }
 }
 
-function saveServerList(value) {
-  fs.writeFileSync(dataStoreFileName, value);
-}
 
-function findOpenServer(servers, user) {
+function findOpenServer(db, user) {
   
-  for (var i = 0; i < servers.length; i++) {
-    var server = servers[i];
+  for (var i = 0; i < db.length; i++) {
+    var server = db[i];
     var currentTime = new Date() / 1000;
     console.log(server);
     console.log(currentTime - server.timestamp);
     if (user === server.user) {
-      return null;
+      return i;
     }
     if (server.timestamp === undefined || server.timestamp === null ) {
       console.log(server.name+": no timestamp");
@@ -76,14 +68,49 @@ function findOpenServer(servers, user) {
   return null;
 }
 
+function reserveServer(server, user_name) {
+  server.timestamp = new Date()/1000;
+  server.user = user_name;
+}
+
+function constructServerList(db) {
+  var results = "";
+  console.log(JSON.stringify(db));
+  for (var i = 0; i < db.length; i++) {  
+    var server = db[i];
+    var line = ":computer: " + server.name;
+    if (server.user === undefined || server.user === null) {
+      line += " : available";
+    }
+    else {
+      line += ": "+server.user+"\n";
+    }
+    results += line + "\n";
+  }
+  return results;
+}
+
+function createBaseSlackResponse(text, in_channel) {
+  var result = {
+    "text": text,
+    "attachments": [
+    ]
+  };
+  
+  if (in_channel) {
+    result.response_type = in_channel;
+  }
+  
+  return result;
+}
+
+
 // could also use the POST body instead of query string: http://expressjs.com/en/api.html#req.body
 app.post("/betabot", function (request, response) {
   var user_name = request.body.user_name;
   var commandText = request.body.text;
   var channel_name = request.body.channel_name;
-  
-  
-  // console.log(request.body);
+
   /*
   if (channel_name !== 'eng' && channel_name !=='directmessage') {
     response.send("This bot is only available from #eng.");
@@ -92,53 +119,53 @@ app.post("/betabot", function (request, response) {
   */
   
   var parts = commandText.split(" ");
-  if (parts[0] === 'list') {
-    var servers = readServerList();
-    saveServerList(servers);
-    return;
-    var results = "List of servers: \n";
-    for (var i = 0; i < servers.server.length; i++) {
-      var server = servers.server[i];
-      console.log(server);
-      var line = server.name;
-      if (server.user === undefined || server.user === null) {
-        line += " : available";
+  var command = parts[0];
+  if (command === 'list') {
+    serverList.read(
+      function(db) {
+        updateTimestamps(db);
+        serverList.save(db);
+        response.send(constructServerList(db));
       }
-      else {
-        line += ": "+server.user+"\n";
-      }
-      results += line + "\n";
-    }
-    response.send(results); // sends dbUsers back to the page
+    );
   }
-  else if (parts[0] === 'clear') {
-    fs.unlinkSync(dataStoreFileName)
+  else if (command === 'clear') {
+    serverList.delete();
     response.send("clear complete.");
   }
-  else { 
-    var servers = readServerList();
-    var openIndex = findOpenServer(servers.server, user_name);
-    if (openIndex === null) {
-      response.send("No server available. Run /betabot list to see current users.");      
-      return;
-    }
-    
-    servers.server[openIndex].timestamp = new Date()/1000;
-    servers.server[openIndex].user = user_name;
-    saveServerList(servers);
-    
-    var result = {
-      "response_type": "in_channel",
-      "text": servers.server[openIndex].name + ".payjoy.com was reserved by "+user_name+" for one hour.",
-      "attachments": [
-        {
-            "text":""
+  else if (command === 'reserve') { 
+    serverList.read(
+      function(db) {
+        var openIndex = findOpenServer(db, user_name);
+        if (openIndex === null) {
+          response.send("No server available.\n"+constructServerList(db));      
+          return;
         }
-      ]
-    };
-    
-    response.send(result);
+        
+        reserveServer(db[openIndex], user_name);
+        serverList.save(db);
+        
+        var slackResponse = createBaseSlackResponse(db[openIndex].name + " is now reserved for you for an hour.", true);
+        response.send(slackResponse);
+      }
+    );
   }
+  else if (command === 'help') {
+    
+    serverList.read(
+      function(db) {
+
+
+    var slackResponse = createBaseSlackResponse("Betabot commands:", false);
+    slackResponse.attachments.push(
+      { "text": "/list lists all servers and who is using them."},
+      { "text": "/reserve will pick an open server and reserve it in your name"},
+      { "text": "/clear will clear all reservations."}
+    );
+    response.send(slackResponse);
+  });
+}
+                                   
 });
 
 
