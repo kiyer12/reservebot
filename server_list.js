@@ -33,5 +33,9 @@ module.exports = {
   },
   delete: function() {
     fs.unlinkSync(module.exports.dataStoreFileName);
+  },
+  whenAvailable: function(server) {
+    if (server.user === undefined || server.user === null) {
+      return server.timestamp;    }
   }
 };

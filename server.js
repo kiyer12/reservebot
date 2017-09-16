@@ -34,7 +34,7 @@ function updateTimestamps(db) {
   for (var i = 0; i < db.length; i++) {
     var server = db[i];
     var currentTime = new Date() / 1000;
-
+        
     if (server.timestamp === undefined || server.timestamp === null ) {
       
     }
@@ -55,11 +55,12 @@ function findOpenServer(db, user) {
     if (user === server.user) {
       return i;
     }
-    if (server.timestamp === undefined || server.timestamp === null ) {
-      console.log(server.name+": no timestamp");
+    
+    var timestamp = serverList.whenAvailable(server);
+    if (!timestamp) {
       return i;
     }
-    else if (currentTime - server.timestamp > 3600) {
+    if (currentTime - server.timestamp > 3600) {
       console.log(server.name+": expire reservation");
       return i;
     }
@@ -75,7 +76,6 @@ function reserveServer(server, user_name) {
 
 function constructServerList(db) {
   var results = "";
-  console.log(JSON.stringify(db));
   for (var i = 0; i < db.length; i++) {  
     var server = db[i];
     var line = ":computer: " + server.name;
