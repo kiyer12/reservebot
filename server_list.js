@@ -1,4 +1,6 @@
 var fs = require('fs');
+var moment = require('moment-timezone');
+
 module.exports = {
   dataStoreFileName: '.data/data.json',
   defaultData: [
@@ -32,10 +34,19 @@ module.exports = {
     fs.writeFileSync(module.exports.dataStoreFileName, JSON.stringify(value));
   },
   delete: function() {
-    fs.unlinkSync(module.exports.dataStoreFileName);
+    try {
+      fs.unlinkSync(module.exports.dataStoreFileName);
+    }
+    catch(e) {
+      console.log('no file to delete. '+e);
+    }
   },
   whenAvailable: function(server) {
     if (server.user === undefined || server.user === null) {
       return server.timestamp;    }
+  },
+  timestampString: function(ts) {
+    var m = moment(ts);
+    return m.tz('America/Los_Angeles').fromNow();
   }
 };

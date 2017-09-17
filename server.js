@@ -1,34 +1,13 @@
+var dateFormat = require('dateformat');
 var serverList = require('./server_list.js');
-
 var express = require('express');
 var app = express();
-
-// http://expressjs.com/en/starter/static-files.html
-app.use(express.static('public'));
 
 var bodyParser = require('body-parser');
 app.use(bodyParser.json()); // for parsing application/json
 app.use(bodyParser.urlencoded({ extended: true })); // for parsing application/x-www-form-urlencoded
 
 var fs = require('fs');
-
-app.get("/list", function (request, response) { 
-  serverList.read(
-    function(db) {
-      console.log("back from reading list.");
-      response.send(constructServerList(db));      
-    }
-  );
-});
-
-
-
-app.get("/clear", function (request, response) {
-  serverList.delete();
-  response.send("clear done");
-});
-
-
 
 function updateTimestamps(db) {
   for (var i = 0; i < db.length; i++) {
@@ -43,7 +22,6 @@ function updateTimestamps(db) {
     }
   }
 }
-
 
 function findOpenServer(db, user) {
   
@@ -60,7 +38,7 @@ function findOpenServer(db, user) {
     if (!timestamp) {
       return i;
     }
-    if (currentTime - server.timestamp > 3600) {
+    if (currentTime - server.timestamp > 0) {
       console.log(server.name+": expire reservation");
       return i;
     }
@@ -70,7 +48,7 @@ function findOpenServer(db, user) {
 }
 
 function reserveServer(server, user_name) {
-  server.timestamp = new Date()/1000;
+  server.timestamp = (new Date()/1000) + 3600*4;
   server.user = user_name;
 }
 
@@ -89,6 +67,24 @@ function constructServerList(db) {
   }
   return results;
 }
+
+function listServers(db) {
+  var results = [];
+  for (var i = 0; i < db.length; i++) {  
+    var line = ":computer: " + db[i].name;
+    if (db[i].user === undefined || db[i].user === null) {
+      line += " : available";
+    }
+    else {
+      var until = new Date(db[i].timestamp*1000);
+      line += ": reserved by @"+db[i].user+". Reservation expires "+serverList.timestampString(db[i].timestamp*1000);
+    }
+    results.push( {text: line} );
+  }
+  return results;
+}
+
+
 
 function createBaseSlackResponse(text, in_channel) {
   var result = {
@@ -117,10 +113,11 @@ app.post("/betabot", function (request, response) {
     return;
   }
   */
-  
+
   var parts = commandText.split(" ");
   var command = parts[0];
-  if (command === 'list') {
+  console.log(command);
+  if (command === 'list' || command === null) {
     serverList.read(
       function(db) {
         updateTimestamps(db);
@@ -131,7 +128,8 @@ app.post("/betabot", function (request, response) {
   }
   else if (command === 'clear') {
     serverList.delete();
-    response.send("clear complete.");
+    var slackResponse = createBaseSlackResponse("All reservations cleared.", true);
+    response.send(slackResponse);
   }
   else if (command === 'reserve') { 
     serverList.read(
@@ -145,7 +143,8 @@ app.post("/betabot", function (request, response) {
         reserveServer(db[openIndex], user_name);
         serverList.save(db);
         
-        var slackResponse = createBaseSlackResponse(db[openIndex].name + " is now reserved for you for an hour.", true);
+        var until = new Date(db[openIndex].timestamp*1000);
+        var slackResponse = createBaseSlackResponse(":computer: "+db[openIndex].name + " reserved by @"+user_name+". Expires "+serverList.timestampString(db[openIndex].timestamp*1000), true);
         response.send(slackResponse);
       }
     );
@@ -154,17 +153,27 @@ app.post("/betabot", function (request, response) {
     
     serverList.read(
       function(db) {
+        var slackResponse = createBaseSlackResponse("Betabot commands:", false);
+        slackResponse.attachments.push(
+          { "text": "/list will list all servers and who is using them."},
+          { "text": "/reserve will pick an open server and reserve it in your name"},
+          { "text": "/clear will clear all reservations."}
+        );
+        response.send(slackResponse);
+    });
+  }
+  else {
+    serverList.read(
+      function(db) {
+        updateTimestamps(db);
+        serverList.save(db);
 
-
-    var slackResponse = createBaseSlackResponse("Betabot commands:", false);
-    slackResponse.attachments.push(
-      { "text": "/list lists all servers and who is using them."},
-      { "text": "/reserve will pick an open server and reserve it in your name"},
-      { "text": "/clear will clear all reservations."}
+        var slackResponse = createBaseSlackResponse(":computer: List of servers:", true);
+        slackResponse.attachments = listServers(db);
+        response.send(slackResponse);
+      }
     );
-    response.send(slackResponse);
-  });
-}
+  }
                                    
 });
 

@@ -13,7 +13,10 @@
   "dependencies": {
     "express": "^4.15.3",
     "body-parser": "*",
-    "lowdb": "*"
+    "lowdb": "*",
+    "dateformat": "*",
+    "moment": "*",
+    "moment-timezone":"*"
   },
   "engines": {
     "node": "8.x"
